@@ -12,7 +12,7 @@ import platform
 import pandas as pd
 import seaborn as sns
 from importlib.metadata import version
-from ucimlrepo import fetch_ucirepo
+from ucimlrepo import DatasetNotFoundError, fetch_ucirepo
 from matplotlib.axes import Axes
 import matplotlib.pyplot as plt
 from numpy.typing import ArrayLike
@@ -53,13 +53,25 @@ def get_environment_info() -> dict[str, str]:
 
 
 def load_dataset(dataset_name: str, path: str | Path | None = None, target_column: str | None = None) -> tuple[pd.DataFrame, pd.Series]:
-    """Load SPAM from UCI or DHI from a CSV file."""
+    """Load SPAM from UCI (or its bundled copy when unavailable), or DHI from CSV."""
 
     if dataset_name == "SPAM":
-        spambase = fetch_ucirepo(id=94)
-
-        X = spambase.data.features
-        y = spambase.data.targets.iloc[:, 0] # to make y a pd.Series
+        try:
+            spambase = fetch_ucirepo(id=94)
+        except (ConnectionError, DatasetNotFoundError):
+            folder = Path(__file__).parent / "datasets" / "spam"
+            # The .data file has no header. The .names file lists features in order.
+            names = [
+                line.split(":", 1)[0]
+                for line in (folder / "spambase.names").read_text().splitlines()
+                if line.endswith("continuous.")
+            ]
+            X = pd.read_csv(folder / "spambase.data", header=None)
+            X.columns = [*names, "Class"]
+            y = X.pop("Class")
+        else:
+            X = spambase.data.features
+            y = spambase.data.targets.iloc[:, 0]
 
     elif dataset_name == "DHI":
         df = pd.read_csv(path)
