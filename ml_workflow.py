@@ -12,6 +12,7 @@ import platform
 import pandas as pd
 import seaborn as sns
 from importlib.metadata import version
+from ucimlrepo import fetch_ucirepo
 from matplotlib.axes import Axes
 import matplotlib.pyplot as plt
 from numpy.typing import ArrayLike
@@ -51,31 +52,25 @@ def get_environment_info() -> dict[str, str]:
 # --- 1. Data import ---
 
 
-def load_dataset(
-    dataset_name: str, path: str | Path | None = None, target_column: str | None = None
-) -> tuple[pd.DataFrame, pd.Series]:
-    """Read local SPAM or DHI data and separate the features from the binary target."""
+def load_dataset(dataset_name: str, path: str | Path | None = None, target_column: str | None = None) -> tuple[pd.DataFrame, pd.Series]:
+    """Load SPAM from UCI or DHI from a CSV file."""
+
     if dataset_name == "SPAM":
-        data_path = Path(path) if path is not None else Path(__file__).parent / "datasets/spam/spambase.data"
-        target_column = target_column or "spam"
-        # Spambase stores its feature names separately, in column order.
-        feature_names = [
-            line.split(":", 1)[0].strip()
-            for line in data_path.with_suffix(".names").read_text().splitlines()
-            if ":" in line and not line.lstrip().startswith("|")
-        ]
-        frame = pd.read_csv(data_path, header=None)
-        frame.columns = [*feature_names, target_column]
+        spambase = fetch_ucirepo(id=94)
+
+        X = spambase.data.features
+        y = spambase.data.targets.iloc[:, 0] # to make y a pd.Series
+
     elif dataset_name == "DHI":
-        if path is None:
-            raise ValueError("DHI requires a CSV path")
-        frame = pd.read_csv(path)
-        target_column = target_column or "Diabetes_binary"
+        df = pd.read_csv(path)
+
+        X = df.drop(columns=target_column)
+        y = df[target_column]
+
     else:
         raise ValueError(f"Unknown dataset: {dataset_name}")
 
-    y = frame.pop(target_column)
-    return frame, y
+    return X, y
 
 
 # --- 2. Exploration ---

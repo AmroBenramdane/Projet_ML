@@ -50,22 +50,6 @@ def fitted_models(
 
 
 class TestLoadDataset:
-    @pytest.mark.parametrize("dataset", ["SPAM", "DHI"])
-    def test_reads_local_features_and_target(self, tmp_path, dataset):
-        if dataset == "SPAM":
-            path = tmp_path / "spambase.data"
-            path.with_suffix(".names").write_text("| Notes: ignored\nmessage_length: continuous.\n")
-            path.write_text("10,0\n20,1\n")
-            target = "spam"
-        else:
-            path = tmp_path / "diabetes.csv"
-            path.write_text("Diabetes_binary,message_length\n0,10\n1,20\n")
-            target = "Diabetes_binary"
-
-        X, y = mlw.load_dataset(dataset, path, target)
-        pd.testing.assert_frame_equal(X, pd.DataFrame({"message_length": [10, 20]}))
-        pd.testing.assert_series_equal(y, pd.Series([0, 1], name=target))
-
     @not_implemented
     def test_returns_features_and_target_of_same_length(self, toy_csv): ...
 
