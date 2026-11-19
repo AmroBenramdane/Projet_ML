@@ -150,10 +150,28 @@ def plot_correlation_matrix(X: pd.DataFrame, ax: Axes | None = None) -> Axes:
 
 
 def clean_dataset(
-    X: pd.DataFrame, y: pd.Series, drop_duplicates: bool = True
+    X: pd.DataFrame, y: pd.Series, drop_duplicates: bool = False
 ) -> tuple[pd.DataFrame, pd.Series]:
-    """Stateless cleaning (types, missing targets, duplicates); NaN features stay."""
-    raise NotImplementedError
+    """Keep labeled binary observations in input order, preserving feature NaNs.
+
+    When requested, keep only the first occurrence of each (features, target) row.
+    """
+    if not X.index.equals(y.index):
+        raise ValueError("X and y must have the same index in the same order")
+
+    labeled = y.notna()
+    X_clean = X.loc[labeled].copy()
+    y_clean = y.loc[labeled].copy()
+    if not y_clean.isin([0, 1]).all():
+        raise ValueError("Expected binary target values 0 or 1")
+
+    if drop_duplicates:
+        rows = pd.concat([X_clean, y_clean], axis=1, ignore_index=True)
+        keep = ~rows.duplicated()
+        X_clean = X_clean.loc[keep]
+        y_clean = y_clean.loc[keep]
+
+    return X_clean, y_clean
 
 
 # --- 4. Splitting ---

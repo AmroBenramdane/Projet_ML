@@ -78,20 +78,36 @@ class TestGetClassDistribution:
 
 
 class TestCleanDataset:
-    @not_implemented
-    def test_removes_exact_duplicate_rows(self, toy_dataset): ...
+    @pytest.mark.parametrize("drop_duplicates, expected", [(False, [0, 1, 2]), (True, [0, 2])])
+    def test_keeps_labeled_rows_and_optionally_removes_exact_repeats(self, drop_duplicates, expected):
+        index = [4, 4, 7, 9]
+        X = pd.DataFrame({"feature": [None, None, None, 5]}, index=index)
+        y = pd.Series([0, 0, 1, None], index=index, name="target")
+        original_X, original_y = X.copy(), y.copy()
 
-    @not_implemented
-    def test_keeps_duplicates_when_disabled(self, toy_dataset): ...
+        X_clean, y_clean = mlw.clean_dataset(X, y, drop_duplicates=drop_duplicates)
 
-    @not_implemented
-    def test_features_and_target_stay_aligned(self, toy_dataset): ...
+        pd.testing.assert_frame_equal(X_clean, original_X.iloc[expected])
+        pd.testing.assert_series_equal(y_clean, original_y.iloc[expected])
+        pd.testing.assert_frame_equal(X, original_X)
+        pd.testing.assert_series_equal(y, original_y)
 
-    @not_implemented
-    def test_missing_feature_values_are_left_in_place(self, toy_dataset): ...
+    def test_keeps_repeats_by_default(self):
+        X = pd.DataFrame({"feature": [5, 5]})
+        y = pd.Series([1, 1])
+        X_clean, y_clean = mlw.clean_dataset(X, y)
+        pd.testing.assert_frame_equal(X_clean, X)
+        pd.testing.assert_series_equal(y_clean, y)
 
-    @not_implemented
-    def test_inputs_are_not_modified(self, toy_dataset): ...
+    def test_rejects_misaligned_index(self):
+        X = pd.DataFrame({"feature": [1, 2]})
+        y = pd.Series([0, 1], index=[1, 0])
+        with pytest.raises(ValueError, match="index"):
+            mlw.clean_dataset(X, y)
+
+    def test_rejects_unexpected_target(self):
+        with pytest.raises(ValueError, match="binary"):
+            mlw.clean_dataset(pd.DataFrame({"feature": [3]}), pd.Series([2]))
 
 
 # --- 4. Splitting ---
