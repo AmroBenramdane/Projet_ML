@@ -19,7 +19,7 @@ python -m pip install -r requirements.txt
 
 ## Data
 
-Put the Moodle files in `data/spam.csv` and `data/dhi.csv`, then set `TARGET_COLUMN` in the configuration cell of each notebook.
+The notebooks read the files in `datasets/` locally. SPAM uses `spam/spambase.data` (comma-separated, no header) and `spam/spambase.names` for feature names. Its last column is the spam label. DHI uses `dbh/diabetes_binary_health_indicators_BRFSS2015.csv` with the target column `Diabetes_binary`.
 
 ## Usage
 
@@ -35,5 +35,7 @@ _TODO_
 ## AI usage
 
 The initial scaffold (function signatures of `ml_workflow.py`, test skeleton of `tests.py`, notebook structure, `requirements.txt`, `.gitignore`, this README) was generated with Claude Code (Anthropic).
+
+Codex helped adapt the shared loader and notebook paths to read the local files and verify the import and exploration steps.
 
 _TODO: why AI was used, how its output was reviewed, and any later use._
