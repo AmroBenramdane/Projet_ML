@@ -97,20 +97,29 @@ def get_class_distribution(y: pd.Series) -> pd.DataFrame:
     })
 
 
-def plot_class_distribution(y: pd.Series, ax: Axes | None = None) -> Axes:
-    """Bar chart of the class counts."""
-    
+def plot_class_distribution(
+    y: pd.Series, ax: Axes | None = None, *, labels: Mapping[Any, str] | None = None
+) -> Axes:
+    """Show each class as a percentage of the labeled observations."""
     if ax is None:
-        fig, ax = plt.subplots()
+        _, ax = plt.subplots()
 
-    distribution = get_class_distribution(y)
+    percentages = 100 * get_class_distribution(y)["proportion"]
+    names = [labels.get(value, str(value)) if labels else str(value) for value in percentages.index]
+    bars = ax.bar(names, percentages)
+    ax.bar_label(bars, fmt="%.1f%%", padding=2)
+    ax.set(ylim=(0, 100), title="Class distribution", xlabel="Class", ylabel="Observations (%)")
+    return ax
 
-    ax.bar(distribution.index.astype(str), distribution["count"])
 
-    ax.set_title("Class distribution")
-    ax.set_xlabel("Class")
+def plot_feature_histogram(
+    values: pd.Series, ax: Axes | None = None, *, log_scale: bool = False
+) -> Axes:
+    """Plot feature counts with equal-width bins on the selected scale."""
+    if ax is None:
+        _, ax = plt.subplots()
+    sns.histplot(values, bins=30, log_scale=log_scale, ax=ax)
     ax.set_ylabel("Number of observations")
-
     return ax
 
 
@@ -120,7 +129,7 @@ def plot_correlation_matrix(X: pd.DataFrame, ax: Axes | None = None) -> Axes:
     if ax is None:
         fig, ax = plt.subplots(figsize=(12, 10))
 
-    sns.heatmap(X.corr(), cmap="coolwarm", ax=ax)
+    sns.heatmap(X.corr(), cmap="coolwarm", vmin=-1, vmax=1, center=0, ax=ax)
 
     return ax
 
