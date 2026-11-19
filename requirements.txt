@@ -1,0 +1,17 @@
+# Exact versions the project was set up and checked with.
+# Requires Python >= 3.12: numpy 2.5 and scipy 1.18 do not install on 3.10/3.11.
+# Install inside the activated venv with: python -m pip install -r requirements.txt
+
+# Workflow (ml_workflow.py)
+numpy==2.5.4
+pandas==3.1.1
+scikit-learn==1.9.1
+matplotlib==3.11.2
+seaborn==0.13.2
+ucimlrepo==0.0.7
+
+# Notebooks (spam.ipynb, dhi.ipynb)
+notebook==7.6.5
+
+# Tests (tests.py)
+pytest==9.2.0
