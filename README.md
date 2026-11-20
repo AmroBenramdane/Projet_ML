@@ -1,39 +1,57 @@
-# Machine Learning Project
+# Classification binaire sur Spambase et BRFSS 2015
 
-Binary classification on two datasets with one shared workflow (`ml_workflow.py`).
+Ce projet applique le même workflow à deux décisions différentes. Pour un filtre anti-spam, bloquer un message légitime coûte cher. Pour l’enquête diabète, la première question est de retrouver une classe positive rare. Les notebooks choisissent donc leurs critères avant l’entraînement. [Sujet du projet](description.pdf)
 
-| Dataset | Notebook |
-|---|---|
-| [SPAM](https://archive.ics.uci.edu/dataset/94/spambase) | [spam.ipynb](spam.ipynb) |
-| [Diabetes Health Indicators](https://www.kaggle.com/datasets/alexteboul/diabetes-health-indicators-dataset) | [dhi.ipynb](dhi.ipynb) |
+| Notebook | Données livrées | Critère de sélection | Résultat sur le test réservé |
+|---|---|---|---|
+| [SPAM](spam.ipynb) | 4 601 e-mails, 57 variables | F₀,₅ sur des profils inédits | Boosting, F₀,₅ de 0,947 |
+| [Diabète](dhi.ipynb) | 253 680 répondants, 21 variables | Précision moyenne (AP) | Boosting, AP de 0,424 pour une prévalence de 0,139 |
 
-## Setup
+## Reproduire le projet
 
-Python ≥ 3.12 (check with `python3 --version`). The pinned numpy/scipy versions do not install on 3.10 or 3.11.
+Depuis la racine du dépôt, avec Python 3.12, exécuter les commandes suivantes. Les deux fichiers de données utilisés sont inclus dans `datasets/`. Le chemin SPAM explicite permet de rejouer le notebook hors ligne après l’installation.
 
 ```bash
-python3 -m venv .venv               # Ubuntu/Debian: first `sudo apt install python3.12-venv`
-source .venv/bin/activate           # Windows: .venv\Scripts\activate
+python3 -m venv .venv
+source .venv/bin/activate
 python -m pip install -r requirements.txt
+python -m pytest -q tests.py
+jupyter notebook
 ```
 
-## Data
-
-Put the Moodle files in `data/spam.csv` and `data/dhi.csv`, then set `TARGET_COLUMN` in the configuration cell of each notebook.
-
-## Usage
+Dans Jupyter, choisir le noyau de l’environnement et exécuter toutes les cellules dans l’ordre. Pour exécuter les deux notebooks en ligne de commande et enregistrer une nouvelle copie de leurs sorties dans un répertoire distinct :
 
 ```bash
-jupyter notebook   # run spam.ipynb or dhi.ipynb
-pytest tests.py
+mkdir -p /tmp/projet-ml-results
+jupyter nbconvert --to notebook --execute --ExecutePreprocessor.timeout=1500 \
+  --output-dir=/tmp/projet-ml-results spam.ipynb dhi.ipynb
 ```
 
-## Authors
+## Protocole et lecture des résultats
 
-_TODO_
+Toute la logique d’import, de nettoyage, de séparation, de transformation, d’apprentissage et de calcul des scores se trouve dans [ml_workflow.py](ml_workflow.py). Les notebooks configurent l’expérience, présentent ses résultats et les interprètent. Les graphiques descriptifs initiaux portent sur le corpus. Les classements de variables, l’ajustement des transformations et la recherche de modèles utilisent exclusivement l’entraînement.
 
-## AI usage
+- **Unité d’observation.** Les répétitions sont comptées et conservées. Pour SPAM, les profils de variables identiques sont regroupés lors du découpage final et de la validation croisée. Pour le diabète, une séparation stratifiée par ligne reproduit la fréquence de la cible.
+- **Comparaison équitable.** Chaque famille utilise les mêmes cinq plis sur environ 80 % des observations. La régression logistique compare les variables standardisées, une sélection par test F et une PCA conservant 95 % de la variance. Un arbre de décision compare deux profondeurs. Le boosting compare deux nombres maximaux de feuilles. Chaque meilleur candidat est réajusté sur tout l’entraînement. Le choix de la famille précède l’examen des scores finaux.
+- **Interprétation.** La référence majoritaire révèle ce qu’un score d’exactitude élevé peut masquer. Les matrices de confusion chiffrent les erreurs au seuil par défaut. Les courbes précision-rappel et ROC décrivent le classement lorsque le seuil varie. L’AP est une moyenne pondérée des précisions aux différents niveaux de rappel.
+- **Portée.** La dispersion entre plis décrit la sensibilité au découpage. Les deux tests sont internes aux corpus. Le filtrage de courriels contemporains et la prédiction dans une autre population nécessiteraient des données externes.
 
-The initial scaffold (function signatures of `ml_workflow.py`, test skeleton of `tests.py`, notebook structure, `requirements.txt`, `.gitignore`, this README) was generated with Claude Code (Anthropic).
+## Points d’appui pour la correction
 
-_TODO: why AI was used, how its output was reviewed, and any later use._
+Une autre copie peut défendre un autre modèle. Pour comparer les travaux, vérifier d’abord l’unité de test, le sens de la classe positive et le protocole de sélection : ces choix déterminent ce que mesure chaque score.
+
+| Question à poser | Élément vérifiable dans le projet |
+|---|---|
+| Une observation de test intervient-elle dans le choix du modèle ? | Le classement en validation croisée fixe le gagnant avant le tableau de test. Les transformations sont dans le pipeline ajusté à chaque pli. |
+| La réduction de dimension apporte-t-elle quelque chose ? | Les trois représentations de la régression sont comparées sur les mêmes plis avec la même grille de régularisation. |
+| Le traitement propre à chaque jeu change-t-il le résultat ? | SPAM compare deux découpages à modèle fixé. Diabète compare deux pondérations à plis et modèle fixés. |
+| La conclusion correspond-elle à l’usage ? | Chaque notebook confronte le critère principal aux faux positifs, aux faux négatifs et aux limites du corpus. |
+| Le code vérifie-t-il ses hypothèses ? | Les [tests](tests.py) couvrent notamment l’alignement des cibles, les doublons, l’isolement des groupes, les statistiques apprises sur l’entraînement et des métriques calculables à la main. |
+
+## Données et assistance à la réalisation
+
+Spambase est un corpus constitué chez Hewlett-Packard en 1999. Les variables décrivent des fréquences et des suites de majuscules. [Fiche UCI](https://archive.ics.uci.edu/dataset/94/spambase) · [Documentation livrée avec les données](datasets/spam/spambase.DOCUMENTATION)
+
+Le fichier diabète est la version binaire non rééquilibrée des *Diabetes Health Indicators*, dérivée de l’enquête américaine BRFSS 2015. [Distribution et description des fichiers](https://www.kaggle.com/datasets/alexteboul/diabetes-health-indicators-dataset)
+
+Claude Code a fourni le squelette initial du module, des tests et des notebooks. Codex a servi à compléter le workflow commun, à construire les comparaisons et à rédiger les interprétations de cet exemple pédagogique. Les résultats ont été contrôlés en exécutant les notebooks sur les fichiers du dépôt et en testant séparément les règles de préparation et de calcul des scores.

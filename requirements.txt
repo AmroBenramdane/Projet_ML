@@ -9,6 +9,7 @@ scikit-learn==1.9.1
 matplotlib==3.11.2
 seaborn==0.13.2
 ucimlrepo==0.0.7
+threadpoolctl==3.8.0
 
 # Notebooks (spam.ipynb, dhi.ipynb)
 notebook==7.6.5
