@@ -132,18 +132,16 @@ def test_pca_scaler_and_pipeline_fit_boundaries(sample):
     assert fitted.predict(test).shape == (len(test),)
 
 
-@pytest.mark.parametrize("method", ["kbest", "rfe", "model"])
-def test_selector_keeps_informative_column(sample, method):
+def test_selector_keeps_informative_column(sample):
     X, y = sample
-    pipeline = mlw.build_pipeline(LogisticRegression(), selector=mlw.build_feature_selector(method, 1))
+    pipeline = mlw.build_pipeline(LogisticRegression(), selector=mlw.build_feature_selector(1))
     pipeline.fit(X, y)
     assert mlw.get_selected_features(pipeline, X.columns) == ["signal"]
 
 
-@pytest.mark.parametrize("method", ["mutual_info", "f_classif"])
-def test_scores_rank_signal_first(sample, method):
+def test_scores_rank_signal_first(sample):
     X, y = sample
-    scores = mlw.compute_feature_scores(X, y, method)
+    scores = mlw.compute_feature_scores(X, y)
     assert scores.index[0] == "signal"
     assert scores.is_monotonic_decreasing
     assert set(scores.index) == set(X.columns)
@@ -187,3 +185,52 @@ def test_workflow_and_plots(sample):
         assert mlw.plot_model_comparison(scores, "recall", ax=axes[1, 1]) is axes[1, 1]
     finally:
         plt.close(fig)
+
+
+def test_precision_rule_maximizes_recall_then_precision():
+    # At .6 and .7 recall is 2/3. Only .7 also excludes the false positive at .6.
+    y = [1, 1, 0, 0, 1]
+    scores = [.9, .7, .6, .5, .4]
+    assert mlw.choose_precision_threshold(y, scores, .65) == .7
+    assert mlw.choose_precision_threshold(y, scores, .6) == .4
+
+
+def test_precision_rule_excludes_empty_predictions_and_respects_tied_scores():
+    with pytest.raises(ValueError, match="No observed threshold"):
+        mlw.choose_precision_threshold([0, 1], [.8, .8], .98)
+    assert mlw.choose_precision_threshold([0, 1], [.8, .8], .5) == .8
+
+
+def test_threshold_uses_out_of_fold_scores_and_keeps_model_fixed(sample):
+    X, y = sample
+    train, test, y_train, y_test = mlw.split_dataset(X, y)
+    pipe = mlw.build_pipeline(LogisticRegression()).fit(train, y_train)
+    folds = mlw.training_folds(train, y_train, group_profiles=True)
+    scores = mlw.out_of_fold_scores(pipe, train, y_train, folds)
+    fit_rows, valid_rows = folds[0]
+    independent = mlw.train_model(pipe, train.iloc[fit_rows], y_train.iloc[fit_rows])
+    np.testing.assert_allclose(scores[valid_rows], independent.predict_proba(train.iloc[valid_rows])[:, 1])
+    cutoff = mlw.choose_precision_threshold(y_train, scores, .8)
+    result = mlw.evaluate_model(pipe, test, y_test, threshold=cutoff)
+    called_positive = pipe.predict_proba(test)[:, 1] >= cutoff
+    assert result["TP"] + result["FP"] == called_positive.sum()
+    assert result["TP"] == (called_positive & (y_test == 1)).sum()
+
+
+def test_weight_grid_uses_same_boosting_configuration(sample):
+    X, y = sample
+    table, models = mlw.fit_candidates(X, y, scoring="average_precision", compare_weights=True)
+    boosting = table.loc[table.model == "Boosting"]
+    for _, pair in boosting.groupby("parameters"):
+        assert set(pair.weights) == {"uniform", "balanced"}
+    winner = boosting.iloc[0]
+    assert (models["Boosting"]["model"].class_weight or "uniform") == winner.weights
+
+
+def test_precision_interval_resamples_whole_profiles():
+    # Every profile contains one correct and one incorrect alert. Resampling whole
+    # profiles preserves that ratio in every draw, unlike resampling rows.
+    bounds = mlw.grouped_precision_interval([1, 0, 0, 1], [1, 1, 1, 1], [7, 7, 8, 8])
+    assert bounds == (.5, .5)
+    with pytest.raises(ValueError, match="undefined"):
+        mlw.grouped_precision_interval([1, 0], [0, 0], [7, 8])

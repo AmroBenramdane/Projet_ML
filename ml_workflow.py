@@ -21,11 +21,11 @@ from sklearn.base import BaseEstimator, clone
 from sklearn.decomposition import PCA
 from sklearn.dummy import DummyClassifier
 from sklearn.ensemble import HistGradientBoostingClassifier
-from sklearn.feature_selection import RFE, SelectFromModel, SelectKBest, f_classif, mutual_info_classif
+from sklearn.feature_selection import SelectKBest, f_classif
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import (
-    GridSearchCV, StratifiedGroupKFold, StratifiedKFold, cross_validate, train_test_split,
+    GridSearchCV, StratifiedGroupKFold, StratifiedKFold, cross_val_predict, cross_validate, train_test_split,
 )
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
@@ -268,37 +268,16 @@ def plot_pca_explained_variance(X_train: pd.DataFrame, ax: Axes | None = None) -
 # --- 6. Feature selection ---
 
 
-def build_feature_selector(
-    method: Literal["kbest", "rfe", "model"] = "kbest",
-    n_features: int = 10,
-    random_state: int = RANDOM_STATE,
-) -> BaseEstimator:
-    """Unfitted selector keeping n_features."""
-    if method == "kbest":
-        return SelectKBest(f_classif, k=n_features)
-    estimator = LogisticRegression(max_iter=500, random_state=random_state)
-    if method == "rfe":
-        return RFE(estimator, n_features_to_select=n_features)
-    if method == "model":
-        return SelectFromModel(estimator, max_features=n_features, threshold=-np.inf)
-    raise ValueError(f"Unknown feature selection method: {method}")
+def build_feature_selector(n_features: int = 10) -> SelectKBest:
+    """Rank original variables by their univariate ANOVA F statistic."""
+    return SelectKBest(f_classif, k=n_features)
 
 
-def compute_feature_scores(
-    X_train: pd.DataFrame,
-    y_train: pd.Series,
-    method: Literal["mutual_info", "f_classif"] = "mutual_info",
-    random_state: int = RANDOM_STATE,
-) -> pd.Series:
-    """Univariate score of each training feature, sorted descending."""
+def compute_feature_scores(X_train: pd.DataFrame, y_train: pd.Series) -> pd.Series:
+    """Display the same ANOVA scores used by the selector, using training rows only."""
     values = build_imputer().fit_transform(X_train)
-    if method == "f_classif":
-        scores, _ = f_classif(values, y_train)
-    elif method == "mutual_info":
-        scores = mutual_info_classif(values, y_train, random_state=random_state)
-    else:
-        raise ValueError(f"Unknown feature score: {method}")
-    return pd.Series(scores, index=X_train.columns, name=method).sort_values(ascending=False)
+    scores, _ = f_classif(values, y_train)
+    return pd.Series(scores, index=X_train.columns, name="ANOVA F").sort_values(ascending=False)
 
 
 def get_selected_features(
@@ -402,11 +381,15 @@ def tune_hyperparameters(
     param_grid: dict | list[dict],
     X_train: pd.DataFrame,
     y_train: pd.Series,
-    scoring: str | Callable,
+    scoring: str | Callable | Mapping[str, Any],
     cv: StratifiedKFold | list,
+    *,
+    refit: bool | str = True,
 ) -> GridSearchCV:
     """Grid search refitted on the whole training set."""
-    return GridSearchCV(pipeline, param_grid, cv=cv, scoring=scoring, error_score="raise").fit(X_train, y_train)
+    search = GridSearchCV(pipeline, param_grid, cv=cv, scoring=scoring, refit=refit, error_score="raise")
+    with threadpool_limits(limits=2):
+        return search.fit(X_train, y_train)
 
 
 # --- 8. Evaluation ---
@@ -430,12 +413,63 @@ def compute_metrics(
     return result
 
 
+def out_of_fold_scores(model: Pipeline, X_train: pd.DataFrame, y_train: pd.Series, cv) -> np.ndarray:
+    """Score each training row once with a clone fitted on the other folds."""
+    with threadpool_limits(limits=2):
+        probabilities = cross_val_predict(model, X_train, y_train, cv=cv, method="predict_proba")
+    return probabilities[:, 1]
+
+
+def choose_precision_threshold(y_true: ArrayLike, scores: ArrayLike, min_precision: float) -> float:
+    """Maximize recall at the required empirical precision, breaking ties by higher threshold."""
+    if not 0 < min_precision <= 1:
+        raise ValueError("min_precision must be in (0, 1]")
+    if not np.array_equal(np.unique(y_true), [0, 1]):
+        raise ValueError("Threshold selection requires both binary classes")
+    precision, recall, thresholds = metrics.precision_recall_curve(y_true, scores)
+    # The final PR point corresponds to predicting no positives and has no threshold.
+    feasible = np.flatnonzero(precision[:-1] >= min_precision)
+    if feasible.size == 0:
+        raise ValueError("No observed threshold meets the precision target")
+    best_recall = recall[feasible].max()
+    best = feasible[recall[feasible] == best_recall][-1]
+    return float(thresholds[best])
+
+
+def grouped_precision_interval(
+    y_true: ArrayLike, y_pred: ArrayLike, groups: ArrayLike, *,
+    n_resamples: int = 2000, random_state: int = RANDOM_STATE,
+) -> tuple[float, float]:
+    """Percentile 95% interval for precision at a fixed rule, resampling whole profiles."""
+    rows = pd.DataFrame({
+        "positive": np.asarray(y_pred) == 1,
+        "label": np.asarray(y_true),
+        "group": np.asarray(groups),
+    })
+    rows["correct_positive"] = rows["positive"] & (rows["label"] == 1)
+    totals = rows.groupby("group")[["correct_positive", "positive"]].sum().to_numpy()
+    if totals[:, 1].sum() == 0:
+        raise ValueError("Precision is undefined without positive predictions")
+
+    rng = np.random.default_rng(random_state)
+    estimates = []
+    for _ in range(n_resamples):
+        sample = rng.integers(len(totals), size=len(totals))
+        correct, flagged = totals[sample].sum(axis=0)
+        if flagged:
+            estimates.append(correct / flagged)
+    if not estimates:
+        raise ValueError("No resample contains a positive prediction")
+    return tuple(np.quantile(estimates, [.025, .975]))
+
+
 def evaluate_model(
-    model: Pipeline, X_test: pd.DataFrame, y_test: pd.Series
+    model: Pipeline, X_test: pd.DataFrame, y_test: pd.Series, *, threshold: float | None = None
 ) -> dict[str, float]:
-    """Metrics of a fitted model on the test set."""
-    prediction = model.predict(X_test)
-    result = compute_metrics(y_test, prediction, model.predict_proba(X_test)[:, 1])
+    """Evaluate the default classifier decision or a threshold fixed on training data."""
+    scores = model.predict_proba(X_test)[:, 1]
+    prediction = model.predict(X_test) if threshold is None else scores >= threshold
+    result = compute_metrics(y_test, prediction, scores)
     tn, fp, fn, tp = metrics.confusion_matrix(y_test, prediction, labels=[0, 1]).ravel()
     result.update(TN=tn, FP=fp, FN=fn, TP=tp)
     return result
@@ -512,6 +546,7 @@ def run_workflow(
     test_size: float = TEST_SIZE,
     random_state: int = RANDOM_STATE,
     group_profiles: bool = False,
+    compare_weights: bool = False,
 ) -> tuple[pd.DataFrame, dict[str, Pipeline]]:
     """Split, tune, train and evaluate every model; return results and models."""
     X, y = clean_dataset(X, y)
@@ -524,7 +559,7 @@ def run_workflow(
     X_train, X_test, y_train, y_test = split
     _, models = fit_candidates(
         X_train, y_train, scoring=scoring, class_weight=class_weight,
-        random_state=random_state, group_profiles=group_profiles,
+        random_state=random_state, group_profiles=group_profiles, compare_weights=compare_weights,
     )
     return compare_models(models, X_test, y_test), models
 
@@ -536,6 +571,7 @@ def fit_candidates(
     scoring: str,
     class_weight: str | dict | None = None,
     group_profiles: bool = False,
+    compare_weights: bool = False,
     random_state: int = RANDOM_STATE,
 ) -> tuple[pd.DataFrame, dict[str, Pipeline]]:
     """Compare candidates on the same training folds and refit each family's best pipeline."""
@@ -543,10 +579,17 @@ def fit_candidates(
     scorer = scoring
     if scoring == "f0.5":
         scorer = metrics.make_scorer(metrics.fbeta_score, beta=0.5, zero_division=0)
+    measures = {
+        "primary": scorer,
+        "precision": metrics.make_scorer(metrics.precision_score, zero_division=0),
+        "recall": "recall",
+    }
     grids = get_param_grids()
     rows, models = [], {}
     for name, model in get_models(class_weight, random_state).items():
         grid = grids[name]
+        if compare_weights and name != "Majority":
+            grid = {**grid, "model__class_weight": [None, "balanced"]}
         if name == "Logistic":
             # Vary one representation at a time, keeping the model grid identical.
             pipeline = build_pipeline(model, selector="passthrough", pca_components=.95)
@@ -558,12 +601,11 @@ def fit_candidates(
             ]
         else:
             pipeline = build_pipeline(model)
-        with threadpool_limits(limits=2):
-            search = tune_hyperparameters(pipeline, grid, X_train, y_train, scorer, folds)
+        search = tune_hyperparameters(pipeline, grid, X_train, y_train, measures, folds, refit="primary")
         models[name] = search.best_estimator_
         results = search.cv_results_
-        for params, mean, std in zip(results["params"], results["mean_test_score"], results["std_test_score"]):
-            params = params.copy()
+        for i, setting in enumerate(results["params"]):
+            params = setting.copy()
             pca = params.pop("pca", None)
             selector = params.pop("selector", None)
             representation = "All features"
@@ -571,6 +613,11 @@ def fit_candidates(
                 representation = "PCA 95%"
             elif isinstance(selector, SelectKBest):
                 representation = f"Top {selector.k}"
-            rows.append({"model": name, "features": representation, "parameters": str(params),
-                         "CV mean": mean, "CV SD": std})
+            weight = params.pop("model__class_weight", class_weight)
+            rows.append({
+                "model": name, "features": representation, "parameters": str(params),
+                "weights": weight or "uniform", "CV mean": results["mean_test_primary"][i],
+                "CV SD": results["std_test_primary"][i], "precision": results["mean_test_precision"][i],
+                "recall": results["mean_test_recall"][i],
+            })
     return pd.DataFrame(rows).sort_values("CV mean", ascending=False, kind="stable"), models

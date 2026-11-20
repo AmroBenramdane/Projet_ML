@@ -4,8 +4,8 @@ Ce projet applique le même workflow à deux décisions différentes. Pour un fi
 
 | Notebook | Données livrées | Critère de sélection | Résultat sur le test réservé |
 |---|---|---|---|
-| [SPAM](spam.ipynb) | 4 601 e-mails, 57 variables | F₀,₅ sur des profils inédits | Boosting, F₀,₅ de 0,947 |
-| [Diabète](dhi.ipynb) | 253 680 répondants, 21 variables | Précision moyenne (AP) | Boosting, AP de 0,424 pour une prévalence de 0,139 |
+| [SPAM](spam.ipynb) | 4 601 e-mails, 57 variables | F₀,₅ sur des profils inédits | Boosting, 300 spams détectés sur 363 et 5 messages légitimes bloqués au seuil ajusté |
+| [Diabète](dhi.ipynb) | 253 680 répondants, 21 variables | Précision moyenne (AP) | Boosting, AP de 0,425 pour une prévalence de 0,139 |
 
 ## Reproduire le projet
 
@@ -33,8 +33,8 @@ Toute la logique d’import, de nettoyage, de séparation, de transformation, d�
 
 - **Unité d’observation.** Les répétitions sont comptées et conservées. Pour SPAM, les profils de variables identiques sont regroupés lors du découpage final et de la validation croisée. Pour le diabète, une séparation stratifiée par ligne reproduit la fréquence de la cible.
 - **Comparaison équitable.** Chaque famille utilise les mêmes cinq plis sur environ 80 % des observations. La régression logistique compare les variables standardisées, une sélection par test F et une PCA conservant 95 % de la variance. Un arbre de décision compare deux profondeurs. Le boosting compare deux nombres maximaux de feuilles. Chaque meilleur candidat est réajusté sur tout l’entraînement. Le choix de la famille précède l’examen des scores finaux.
-- **Interprétation.** La référence majoritaire révèle ce qu’un score d’exactitude élevé peut masquer. Les matrices de confusion chiffrent les erreurs au seuil par défaut. Les courbes précision-rappel et ROC décrivent le classement lorsque le seuil varie. L’AP est une moyenne pondérée des précisions aux différents niveaux de rappel.
-- **Portée.** La dispersion entre plis décrit la sensibilité au découpage. Les deux tests sont internes aux corpus. Le filtrage de courriels contemporains et la prédiction dans une autre population nécessiteraient des données externes.
+- **Interprétation.** La référence majoritaire révèle ce qu’un score d’exactitude élevé peut masquer. Pour SPAM, une seconde règle maximise le rappel sous une contrainte de précision empirique de 98 % sur les prédictions hors pli du boosting. Le seuil est gelé avant le calcul des erreurs de cette règle sur le test. Pour le diabète, les poids de classe font partie de la grille et la comparaison isole leur effet sur deux boostings de même complexité. Les courbes précision-rappel et ROC décrivent le classement lorsque le seuil varie. L’AP est une moyenne pondérée des précisions aux différents niveaux de rappel.
+- **Portée.** La dispersion entre plis décrit la sensibilité au découpage. Les deux tests sont internes aux corpus. La version précédente de cet exemple avait déjà publié les scores aux seuils par défaut sur ces découpages. Les nouvelles analyses réutilisent les mêmes tests pour permettre une comparaison appariée. Seules les données d’entraînement servent à calculer les nouveaux réglages. Le filtrage de courriels contemporains et la prédiction dans une autre population nécessiteraient des données externes.
 
 ## Points d’appui pour la correction
 
@@ -44,7 +44,7 @@ Une autre copie peut défendre un autre modèle. Pour comparer les travaux, vér
 |---|---|
 | Une observation de test intervient-elle dans le choix du modèle ? | Le classement en validation croisée fixe le gagnant avant le tableau de test. Les transformations sont dans le pipeline ajusté à chaque pli. |
 | La réduction de dimension apporte-t-elle quelque chose ? | Les trois représentations de la régression sont comparées sur les mêmes plis avec la même grille de régularisation. |
-| Le traitement propre à chaque jeu change-t-il le résultat ? | SPAM compare deux découpages à modèle fixé. Diabète compare deux pondérations à plis et modèle fixés. |
+| Le traitement propre à chaque jeu change-t-il le résultat ? | SPAM compare deux découpages et chiffre le coût d’un blocage plus strict. Diabète compare les pondérations à structure de boosting et plis fixés. |
 | La conclusion correspond-elle à l’usage ? | Chaque notebook confronte le critère principal aux faux positifs, aux faux négatifs et aux limites du corpus. |
 | Le code vérifie-t-il ses hypothèses ? | Les [tests](tests.py) couvrent notamment l’alignement des cibles, les doublons, l’isolement des groupes, les statistiques apprises sur l’entraînement et des métriques calculables à la main. |
 
