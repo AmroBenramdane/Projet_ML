@@ -43,6 +43,24 @@ jupyter notebook   # open notebooks/spam.ipynb or notebooks/dhi.ipynb
 pytest            # runs tests/
 ```
 
+## Model comparison (sections 4.3–6)
+
+Run the setup and test commands from the directory containing this README and its `pytest.ini`. Execute the notebooks from the first cell. The three candidates are logistic regression, a decision tree and histogram gradient boosting. A majority-class predictor gives a baseline. SPAM selects by F1 after exact-row deduplication and keeps 40 variables via a random forest. DHI selects by average precision, compares class weights and keeps 15 variables via ANOVA. Each validation fold fits its own selector on training rows.
+
+The original SPAM import calls UCI. If the service is unavailable, the following replacement for its import cell reads the bundled data with the same 57 feature names. This was the route used for the recorded modeling run. DHI reads its local CSV directly.
+
+```python
+path = ROOT / "data" / "spam" / "spambase.data"
+names = [
+    line.split(":", 1)[0]
+    for line in path.with_suffix(".names").read_text().splitlines()
+    if line.endswith("continuous.")
+]
+X = pd.read_csv(path, header=None)
+X.columns = names + ["Class"]
+y = X.pop("Class")
+```
+
 ## Authors
 
 - Kamel NEHLIL (Marchma - Problème pseudo à cause de Github)
@@ -54,4 +72,4 @@ pytest            # runs tests/
 
 The initial scaffold (function signatures of `ml_workflow.py`, test skeleton of `tests.py`, notebook structure, `requirements.txt`, `.gitignore`, this README) was generated with Claude Code (Anthropic).
 
-_TODO: why AI was used, how its output was reviewed, and any later use._
+Codex completed the model training, evaluation and discussion starting at section 4.3, and filled the unfinished tests. The implementation reuses the selectors, stratified split and preprocessing defined in sections 1–4.2. The three classifiers were compared on the same training folds. The notebook conclusions were checked against the class counts, confusion matrices and scores computed on the bundled data.

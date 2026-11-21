@@ -13,9 +13,6 @@ import ml_workflow as mlw  # noqa: F401
 
 matplotlib.use("Agg")  # headless
 
-not_implemented = pytest.mark.skip(reason="Test not implemented yet")
-
-
 # --- Fixtures ---
 
 
@@ -36,7 +33,10 @@ def toy_dataset() -> tuple[pd.DataFrame, pd.Series]:
 @pytest.fixture
 def toy_csv(tmp_path: Path, toy_dataset: tuple[pd.DataFrame, pd.Series]) -> Path:
     """toy_dataset written to a temporary CSV, target included."""
-    raise NotImplementedError
+    X, y = toy_dataset
+    path = tmp_path / "sample.csv"
+    pd.concat([X, y], axis=1).to_csv(path, index=False)
+    return path
 
 
 @pytest.fixture
@@ -50,41 +50,57 @@ def toy_split(
 
 
 @pytest.fixture
-def fitted_models(
-    toy_split: tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series],
-) -> dict[str, Pipeline]:
-    """Two small pipelines fitted on toy_split."""
-    raise NotImplementedError
+def modeling_sample():
+    rng = np.random.default_rng(14)
+    y = pd.Series(np.tile([0, 0, 1], 36), name="target")
+    X = pd.DataFrame({"signal": y + rng.normal(0, .2, len(y)), "noise": rng.normal(size=len(y))})
+    X.loc[::13, "signal"] = np.nan
+    return X, y
+
+
+@pytest.fixture
+def fitted_models(modeling_sample):
+    X_train, _, y_train, _ = mlw.split_dataset(*modeling_sample)
+    return {
+        name: mlw.train_model(mlw.build_pipeline(model), X_train, y_train)
+        for name, model in mlw.get_models().items()
+    }
 
 
 # --- 1. Data import ---
 
 
 class TestLoadDataset:
-    @not_implemented
-    def test_returns_features_and_target_of_same_length(self, toy_csv): ...
+    def test_returns_features_and_target_of_same_length(self, toy_csv):
+        X, y = mlw.load_dataset("DHI", toy_csv, "target")
+        assert len(X) == len(y) == 6
+        assert X.index.equals(y.index)
 
-    @not_implemented
-    def test_target_column_is_removed_from_features(self, toy_csv): ...
+    def test_target_column_is_removed_from_features(self, toy_csv):
+        X, y = mlw.load_dataset("DHI", toy_csv, "target")
+        assert list(X.columns) == ["feature1", "feature2"]
+        assert y.name == "target"
 
-    @not_implemented
-    def test_missing_file_raises_file_not_found_error(self, tmp_path): ...
+    def test_missing_file_raises_file_not_found_error(self, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            mlw.load_dataset("DHI", tmp_path / "absent.csv", "target")
 
-    @not_implemented
-    def test_unknown_target_column_raises_key_error(self, toy_csv): ...
+    def test_unknown_target_column_raises_key_error(self, toy_csv):
+        with pytest.raises(KeyError):
+            mlw.load_dataset("DHI", toy_csv, "unknown")
 
 
 # --- 2. Exploration ---
 
 
 class TestGetClassDistribution:
-    @not_implemented
-    def test_counts_match_known_class_sizes(self, toy_dataset): ...
+    def test_counts_match_known_class_sizes(self, toy_dataset):
+        _, y = toy_dataset
+        assert mlw.get_class_distribution(y)["count"].to_dict() == {0: 3, 1: 2}
 
-    @not_implemented
-    def test_proportions_sum_to_one(self, toy_dataset): ...
-
-
+    def test_proportions_sum_to_one(self, toy_dataset):
+        _, y = toy_dataset
+        assert mlw.get_class_distribution(y)["proportion"].sum() == pytest.approx(1)
 
 
 # --- 3. Cleaning ---
@@ -223,23 +239,30 @@ class TestCleanDataset:
 
 
 class TestSplitDataset:
-    @not_implemented
-    def test_subset_sizes_match_test_size(self, toy_dataset): ...
+    def test_subset_sizes_match_test_size(self, modeling_sample):
+        train, test, _, _ = mlw.split_dataset(*modeling_sample, test_size=.25)
+        assert (len(train), len(test)) == (81, 27)
 
-    @not_implemented
-    def test_train_and_test_do_not_overlap(self, toy_dataset): ...
+    def test_train_and_test_do_not_overlap(self, modeling_sample):
+        train, test, _, _ = mlw.split_dataset(*modeling_sample)
+        assert train.index.intersection(test.index).empty
 
-    @not_implemented
-    def test_stratification_preserves_class_proportions(self, toy_dataset): ...
+    def test_stratification_preserves_class_proportions(self, modeling_sample):
+        _, _, train, test = mlw.split_dataset(*modeling_sample, test_size=.25)
+        assert train.mean() == test.mean() == pytest.approx(1 / 3)
 
-    @not_implemented
-    def test_same_seed_gives_same_split(self, toy_dataset): ...
+    def test_same_seed_gives_same_split(self, modeling_sample):
+        first = mlw.split_dataset(*modeling_sample)[0]
+        assert_frame_equal(first, mlw.split_dataset(*modeling_sample)[0])
 
-    @not_implemented
-    def test_different_seeds_give_different_splits(self, toy_dataset): ...
+    def test_different_seeds_give_different_splits(self, modeling_sample):
+        first = mlw.split_dataset(*modeling_sample, random_state=42)[1]
+        other = mlw.split_dataset(*modeling_sample, random_state=43)[1]
+        assert set(first.index) != set(other.index)
 
-    @not_implemented
-    def test_invalid_test_size_raises_value_error(self, toy_dataset): ...
+    def test_invalid_test_size_raises_value_error(self, modeling_sample):
+        with pytest.raises(ValueError, match="test_size"):
+            mlw.split_dataset(*modeling_sample, test_size=1.1)
 
 
 # --- 5. Pre-processing ---
@@ -323,90 +346,174 @@ class TestComputeFeatureScores:
 
 
 class TestGetModels:
-    @not_implemented
-    def test_returns_unfitted_classifiers_keyed_by_name(self): ...
+    def test_returns_three_unfitted_classifiers(self):
+        models = mlw.get_models()
+        assert set(models) == {"Logistic", "Tree", "Boosting"}
+        assert all(not hasattr(model, "classes_") for model in models.values())
 
-    @not_implemented
-    def test_class_weight_is_passed_to_supporting_models(self): ...
+    def test_class_weight_is_passed_to_supporting_models(self):
+        assert all(model.class_weight == "balanced" for model in mlw.get_models("balanced").values())
 
-    @not_implemented
-    def test_param_grids_match_the_models(self): ...
+    def test_param_grids_match_the_models(self):
+        grids = mlw.get_param_grids()
+        for name, model in mlw.get_models().items():
+            assert grids[name].keys() <= mlw.build_pipeline(model).get_params().keys()
 
 
 class TestBuildPipeline:
-    @not_implemented
-    def test_steps_follow_the_fixed_order(self): ...
+    def test_steps_follow_the_fixed_order(self):
+        selector = mlw.build_feature_selector("kbest", n_features=1)
+        pipe = mlw.build_pipeline(mlw.get_models()["Logistic"], selector=selector, pca_components=1)
+        assert list(pipe.named_steps) == ["imputer", "scaler", "selector", "pca", "model"]
+        assert pipe["selector"] is not selector
 
-    @not_implemented
-    def test_optional_steps_are_left_out_by_default(self): ...
+    def test_optional_steps_are_left_out_by_default(self):
+        pipe = mlw.build_pipeline(mlw.get_models()["Tree"])
+        assert list(pipe.named_steps) == ["imputer", "scaler", "model"]
 
-    @not_implemented
-    def test_pipeline_accepts_missing_values(self, toy_split): ...
+    def test_pipeline_accepts_missing_values(self, toy_split):
+        train, test, target, _ = toy_split
+        pipe = mlw.build_pipeline(mlw.get_models()["Logistic"])
+        pipe.fit(train, target)
+        assert pipe.predict(test).shape == (len(test),)
 
-    @not_implemented
-    def test_preprocessing_is_learned_from_training_data_only(self, toy_split): ...
+    def test_preprocessing_is_learned_from_training_data_only(self, toy_split):
+        train, test, target, _ = toy_split
+        pipe = mlw.build_pipeline(mlw.get_models()["Logistic"]).fit(train, target)
+        pipe.predict(test + 1000)
+        np.testing.assert_allclose(pipe["imputer"].statistics_, train.median())
+        np.testing.assert_allclose(pipe["scaler"].mean_, train.fillna(train.median()).mean())
 
 
 class TestTrainModel:
-    @not_implemented
-    def test_returns_fitted_pipeline(self, toy_split): ...
+    def test_returns_fitted_pipeline(self, toy_split):
+        train, _, target, _ = toy_split
+        fitted = mlw.train_model(mlw.build_pipeline(mlw.get_models()["Tree"]), train, target)
+        assert isinstance(fitted, Pipeline)
+        np.testing.assert_array_equal(fitted.classes_, [0, 1])
 
-    @not_implemented
-    def test_input_pipeline_is_left_unfitted(self, toy_split): ...
+    def test_input_pipeline_is_left_unfitted(self, toy_split):
+        train, _, target, _ = toy_split
+        pipe = mlw.build_pipeline(mlw.get_models()["Logistic"])
+        mlw.train_model(pipe, train, target)
+        assert not hasattr(pipe["imputer"], "statistics_")
 
-    @not_implemented
-    def test_same_seed_gives_same_predictions(self, toy_split): ...
+    def test_same_seed_gives_same_predictions(self, toy_split):
+        train, test, target, _ = toy_split
+        pipe = mlw.build_pipeline(mlw.get_models()["Tree"])
+        first = mlw.train_model(pipe, train, target)
+        second = mlw.train_model(pipe, train, target)
+        np.testing.assert_array_equal(first.predict(test), second.predict(test))
 
 
 class TestCrossValidation:
-    @not_implemented
-    def test_splitter_yields_same_folds_on_every_call(self, toy_split): ...
+    def test_splitter_yields_same_folds_on_every_call(self, modeling_sample):
+        X, y = modeling_sample
+        folds = mlw.build_cv_splitter(3)
+        for (train, valid), (_, again) in zip(folds.split(X, y), folds.split(X, y)):
+            np.testing.assert_array_equal(valid, again)
+            assert not set(train).intersection(valid)
 
-    @not_implemented
-    def test_cross_validation_returns_one_row_per_fold(self, toy_split): ...
+    def test_cross_validation_returns_one_row_per_fold(self, modeling_sample):
+        X, y = modeling_sample
+        pipe = mlw.build_pipeline(mlw.get_models()["Logistic"])
+        scores = mlw.cross_validate_model(pipe, X, y, ["recall", "f1"], mlw.build_cv_splitter(3))
+        assert list(scores.columns) == ["recall", "f1"]
+        assert scores.shape == (3, 2)
 
-    @not_implemented
-    def test_tuning_selects_parameters_from_the_grid(self, toy_split): ...
-
-
-# --- 8. Evaluation ---
+    def test_tuning_selects_parameters_from_the_grid(self, modeling_sample):
+        X, y = modeling_sample
+        pipe = mlw.build_pipeline(mlw.get_models()["Logistic"])
+        grid = mlw.get_param_grids()["Logistic"]
+        search = mlw.tune_hyperparameters(pipe, grid, X, y, "f1", mlw.build_cv_splitter(3))
+        assert search.best_params_["model__C"] in grid["model__C"]
+        np.testing.assert_allclose(search.best_estimator_["imputer"].statistics_, X.median())
 
 
 class TestComputeMetrics:
-    @not_implemented
-    def test_perfect_predictions_score_one(self): ...
+    def test_perfect_predictions_score_one(self):
+        scores = mlw.compute_metrics([0, 1, 0, 1], [0, 1, 0, 1], [.2, .8, .1, .9])
+        assert all(value == pytest.approx(1) for value in scores.values())
 
-    @not_implemented
-    def test_values_match_hand_computed_example(self): ...
+    def test_values_match_hand_computed_example(self):
+        scores = mlw.compute_metrics([0, 0, 1, 1], [0, 1, 1, 1])
+        assert scores["precision"] == pytest.approx(2 / 3)
+        assert scores["recall"] == 1
+        assert scores["f1"] == pytest.approx(.8)
 
-    @not_implemented
-    def test_score_metrics_are_present_only_with_scores(self): ...
+    def test_score_metrics_are_present_only_with_scores(self):
+        y = [0, 1, 1]
+        assert "average_precision" not in mlw.compute_metrics(y, y)
+        assert "roc_auc" in mlw.compute_metrics(y, y, [.1, .8, .9])
 
-    @not_implemented
-    def test_majority_class_predictor_has_chance_balanced_accuracy(self): ...
+    def test_majority_class_predictor_has_chance_balanced_accuracy(self):
+        y = [0, 0, 0, 1]
+        assert mlw.compute_metrics(y, [0] * 4)["balanced_accuracy"] == .5
 
 
 class TestCompareModels:
-    @not_implemented
-    def test_one_row_per_model_and_one_column_per_metric(
-        self, fitted_models, toy_split
-    ): ...
+    def test_one_row_per_model_and_one_column_per_metric(self, fitted_models, modeling_sample):
+        _, X, _, y = mlw.split_dataset(*modeling_sample)
+        results = mlw.compare_models(fitted_models, X, y)
+        assert set(results.index) == set(fitted_models)
+        assert (results[["TP", "FP", "TN", "FN"]].sum(axis=1) == len(y)).all()
+        assert results["average_precision"].between(0, 1).all()
 
 
 class TestPlots:
-    @not_implemented
-    def test_plot_functions_return_axes(self, fitted_models, toy_split): ...
+    def test_plot_functions_return_axes(self, fitted_models, modeling_sample):
+        from matplotlib.axes import Axes
+        from matplotlib import pyplot as plt
+        _, X, _, y = mlw.split_dataset(*modeling_sample)
+        ax = mlw.plot_roc_curves(fitted_models, X, y)
+        assert isinstance(ax, Axes)
+        assert len(ax.lines) == len(fitted_models)
+        plt.close(ax.figure)
 
-    @not_implemented
-    def test_plot_functions_draw_on_given_axes(self, fitted_models, toy_split): ...
-
-
-# --- 9. Workflow ---
+    def test_plot_functions_draw_on_given_axes(self, fitted_models, modeling_sample):
+        from matplotlib import pyplot as plt
+        _, X, _, y = mlw.split_dataset(*modeling_sample)
+        fig, axes = plt.subplots(1, 3)
+        try:
+            assert mlw.plot_precision_recall_curves(fitted_models, X, y, ax=axes[0]) is axes[0]
+            assert mlw.plot_confusion_matrix(fitted_models["Tree"], X, y, ax=axes[1]) is axes[1]
+            scores = mlw.compare_models(fitted_models, X, y)
+            assert mlw.plot_model_comparison(scores, "f1", ax=axes[2]) is axes[2]
+        finally:
+            plt.close(fig)
 
 
 class TestRunWorkflow:
-    @not_implemented
-    def test_runs_end_to_end_on_toy_dataset(self, toy_dataset): ...
+    def test_end_to_end_with_student_selector(self, modeling_sample):
+        X, y = modeling_sample
+        scores, fitted = mlw.run_workflow(
+            X, y, scoring="average_precision",
+            selector=mlw.build_feature_selector("kbest", n_features=1), compare_weights=True,
+        )
+        assert set(scores.index) == {"Logistic", "Tree", "Boosting", "Majority"}
+        assert scores.loc["Logistic", "average_precision"] > scores.loc["Majority", "average_precision"]
+        assert mlw.get_selected_features(fitted["Logistic"], X.columns) == ["signal"]
+        assert scores.loc["Majority", "recall"] == 0
 
-    @not_implemented
-    def test_same_seed_gives_identical_results(self, toy_dataset): ...
+    def test_same_seed_gives_identical_results(self, modeling_sample):
+        first, _ = mlw.run_workflow(*modeling_sample, scoring="f1")
+        second, _ = mlw.run_workflow(*modeling_sample, scoring="f1")
+        assert_frame_equal(first, second)
+
+
+def test_threshold_maximizes_recall_under_precision_constraint():
+    labels = [1, 0, 1, 0, 1]
+    scores = [.99, .97, .88, .5, .1]
+    assert mlw.choose_precision_threshold(labels, scores, .98) == .99
+    assert mlw.choose_precision_threshold(labels, scores, .6) == .1
+    with pytest.raises(ValueError, match="No observed threshold"):
+        mlw.choose_precision_threshold([0, 1], [.9, .9], .98)
+
+
+def test_threshold_evaluation_counts_tied_scores_as_positive(modeling_sample):
+    X, y = modeling_sample
+    model = mlw.majority_baseline(X, y)
+    threshold = model.predict_proba(X)[0, 1]
+    result = mlw.evaluate_model(model, X, y, threshold=threshold)
+    assert result["TP"] == int(y.sum())
+    assert result["FP"] == len(y) - int(y.sum())
