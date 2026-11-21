@@ -19,7 +19,6 @@ import seaborn as sns
 from sklearn import metrics
 from sklearn.base import BaseEstimator, clone
 from sklearn.decomposition import PCA
-from sklearn.dummy import DummyClassifier
 from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
 from sklearn.feature_selection import (
     RFE,
@@ -561,6 +560,8 @@ def fit_candidates(
 
 def majority_baseline(X_train: pd.DataFrame, y_train: pd.Series) -> Pipeline:
     """Always predict the training majority; use training prevalence as the constant score."""
+    from sklearn.dummy import DummyClassifier
+
     return Pipeline([("model", DummyClassifier(strategy="prior"))]).fit(X_train, y_train)
 
 
